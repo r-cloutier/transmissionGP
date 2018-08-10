@@ -347,3 +347,9 @@ def _save_results(prefix, Ts, gs, rps, Rss, logPcs, rayleighs, chems, logXss,
     np.save('%s/%s_Spectra'%(path2output, prefix), specs)
     np.save('%s/%s_SpectraLabels'%(path2output, prefix),
             np.array(['Wavelength [microns]','Transit depth (percent)']))
+
+
+if __name__ == '__main__':
+    prefix = sys.argv[1]
+    N = int(sys.argv[2])
+    create_ExoTransmit_spectral_set(prefix, N, chems=['TiO','Na','K','H2O'])
