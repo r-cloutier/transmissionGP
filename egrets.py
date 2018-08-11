@@ -1,51 +1,41 @@
 from imports import *
-import GPEmulator
-from save_load_Emulators import *
+from GPEmulator import *
 
+#samples = params
 
-class EGRETS(object):
+class EGRETS():
 
     
-    def __init__(self, WLgrid, training_spectra, training_samples,
-                 testing_spectra=None, testing_samples=None, Ntries=3,
-                 varthresh=.99, Npc=0, factr=10, pgtol=1e-20, 
+    def __init__(self, wl, spectra, params, Ntest=0,
+                 Ntries=10, varthresh=.99, Npc=0, factr=10, pgtol=1e-20, 
 		 optimizeGPemulators=True, verbose=False):
         '''
         Construct a Gaussian process emulator of a radiative transfer 
-        model (i.e. the simulator) given a set of input spectra, computed 
-        using the simulator, to train on. Can also do validation if testing 
-        spectra are given.
-
+        model (i.e. the simulator) given a set of input spectra to train on. 
+        
         Parameters
         ----------
-        `WLgrid` : 1d array (Nwl,)
-            Numpy array of observed wavelengths.
-        `training_spectra` : 2d array (Ntrain, Nwl)
-            Numpy array of model spectra from the simulator function to train
-            the GP emulator on. Ntrain should be large; >~ 100. Units should 
-            be transit depth in per cent; (rp/Rs)^2 * 100% 
-        `training_samples` : 2d array  (Ntrain, Nparams)
-            Numpy array of model parameters used to compute the model training 
-            spectra in `training_spectra`.
-        `testing_spectra` : 2d array (Ntest, Nwl)
-            Numpy array of model spectra from the simulator function to test
-            the GP emulator on. Units should be transit depth in per cent; 
-            (rp/Rs)^2 * 100%
-        `testing_samples` : 2d array (Ntest, Nparams)
-            Numpy array of model parameters used to compute the model testing 
-            spectra in `testing_spectra`.
-        `Ntries` : int
-            Number of attempts to optimize the hyperparameters of the GP 
-            emulator after resampling the initial guess of each hyperparameter 
-            in each iteration.
-        `varthresh` : float
+        `wl` : 1d array (Nwl,)
+            Wavelength array in microns
+        `spectra` : 2d array (Nspec, Nwl)
+            Array of model spectra (in transit depth percent) from the 
+            simulator function to train/test the GP emulator on. Nspec should 
+            be large for a more accurate and comprehensive emulator
+        `params` : 2d array  (Nspec, Nparams)
+            Array of model parameters used to compute the spectra. The 
+            parameters are used as input in the emulator to reproduce a 
+            transmission spectrum
+        `Ntest': int
+            The number of spectra to be used for testing. The remaining spectra 
+            are allocated to the training set (i.e. Nspec = Ntest + Ntrain)
+        `varthresh` : scalar
             A value between 0 and 1 indicating the fraction of the total 
             variance that the user wishes to be encapsulated by the retained 
-            principal components. Alternatively the user can set Npc directly 
+            principal components. Alternatively, the user can set Npc directly 
             rather than the desired variance.
         `Npc` : int
             The number of principal components to retain. If Npc > 0 then it 
-            over-writes the value of varthresh.
+            over-writes the value of varthresh and retains at most Npc PCs
         `factr` : float
             Determines when the optimization algorithm is terminated. Typical 
             values for factr are: 1e12 for low accuracy; 1e7 for moderate 
@@ -53,42 +43,52 @@ class EGRETS(object):
         `pgtol` : float
             Sets the stopping condition for the GP hyperparameter optimization 
             routine.
+        `optimizeGPemulators': bool
+            If True, try to optimize the GP hyperparameters describing the 
+            training set
+        `Ntries` : int
+            Number of attempts to optimize the hyperparameters of the GP 
+            emulator after resampling the initial guess of each hyperparameter 
+            in each iteration.
         `verbose` : bool
             Controls the frequency of printed output to the shell when learning 
             the GP hyperparameters. Set `verbose` to False to prevent such 
             output.
 
         '''
-        # Get training spectra
-        self.WLgrid, self.Nwl = WLgrid, WLgrid.size
-        self.training_spectra, self.training_samples = training_spectra, \
-                                                       training_samples
+        self.wl, self.Nwl = wl, wl.size
+        self.Nparams, self.Ntest = params.shape[1], int(Ntest)
+        if (self.Ntest > 0) & (self.Ntest < spectra.shape[0]):
+            self.testing_spectra, self.testing_params = spectra[:Ntest], \
+                                                        params[:Ntest]
+            self.training_spectra, self.training_params = spectra[Ntest:], \
+                                                          params[:Ntest]
+        else:
+            self.testing_spectra = np.zeros((0,self.Nwl))
+            self.testing_params  = np.zeros((0,self.Nparams))
+            self.training_spectra, self.training_params = spectra, params       
+            
+        # define constants
+        self.Ntrain = self.training_spectra.shape[0]
+        assert self.training_spectra.shape == (self.Ntrain, self.Nwl)
+        assert self.training_params.shape == (self.Ntrain, self.Nparams)
+        assert self.testing_spectra.shape == (self.Ntest, self.Nwl)
+        assert self.testing_params.shape == (self.Ntest, self.Nparams)
 
-        # Scale training spectra to min == zero
-        self._training_opaque_depths = np.min(self.training_spectra, axis=1)
-        self.training_spectra = (self.training_spectra.T - \
-                                 self._training_opaque_depths).T
-
-        # Define constants
-        self.Ntrain, self.Nparams = self.training_samples.shape
         self._varthresh = varthresh if 0 < varthresh <= 1 else .99
         self.Npc, self._factr, self._pgtol= int(Npc), factr, pgtol
+        assert self.Npc <= self.Ntrain
+        
+        # shift training spectra to min = zero
+        #self._training_spectra_opaque_depths = np.min(self.training_spectra,
+        #                                              axis=1)
+        #self.training_spectra = (self.training_spectra.T - \
+        #                         self._training_spectra_opaque_depths).T
+        
+        # scale model parameters to zero mean and unit std 
+        self._scale_input_params()
 
-        # Repeat above for testing set if available
-        if (testing_spectra is not None) and (testing_samples is not None):
-            self.testing_spectra, self.testing_samples = testing_spectra, \
-                                                         testing_samples
-            self.Ntest = self.testing_spectra.shape[0]
-	    self._testing_opaque_depths = np.min(self.testing_spectra, axis=1)
-            self.testing_spectra = (self.testing_spectra.T - \
-            			    self._testing_opaque_depths).T
-        else:
-            self.Ntest = 0
-
-        # Scale model parameters to zero mean and unit std 
-        self._scale_input_samples()
-
-        # Do PCA
+        # do PCA
         self._decompose_spectra()
 
         # Get optimized GP emulator of the basis functions
@@ -98,172 +98,81 @@ class EGRETS(object):
 
 
 
-    def _scale_input_samples(self):
+    def _scale_input_params(self):
         '''
-        Scale the model parameter samples in the training and testing sets to 
-        mean zero and unit standard deviation.
+        Scale the input model parameters (training and testing) to mean zero 
+        and unit standard deviation.
 
         Returns
         -------
-        `_training_samples_means` : array-like (Nparams,)
+        `_training_samples_means` : 1d array (Nparams,)
             List of training model parameter means. Useful for converting 
             scaled parameters back to their input physical units.
-        `_training_samples_stds` : array-like (Nparams,)
+        `_training_samples_stds` : 1d array (Nparams,)
             List of training model parameter standard deviations. Useful for 
             converting scaled parameters back to their input physical units.
-        `training_samples` : array-like (Ntrain,Nparams,)
-            Numpy array of re-scaled model parameters used to compute the 
-            model training spectra in `training_spectra`.
-        `_testing_samples_means` : array-like (Nparams,)
-            See `_training_samples_means`.
-        `_testing_samples_stds` : array-like (Nparams,)
-            See `_training_samples_stds`.
-        `testing_samples` : array-like (Nparams,)
-            See `training_samples`.
-
+        `training_samples` : 2d array (Ntrain, Nparams)
+            Array of training model parameters rescaled to zero mean and unit 
+            standard deviation
+        `_testing_samples_means` : 1d array (Nparams,)
+            List of testing model parameter means. Useful for converting 
+            scaled parameters back to their input physical units.
+        `_testing_samples_stds` : 1d array (Nparams,)
+            List of testing model parameter standard deviations. Useful for 
+            converting scaled parameters back to their input physical units.
+        `testing_samples` : 2d array (Ntest, Nparams)
+            Array of testing model parameters rescaled to zero mean and unit 
+            standard deviation
         '''
-        self._training_samples_means, self._training_samples_stds = \
-                                        self._scale_arr(self.training_samples)
-        self.training_samples = self.scale_samples(self.training_samples,
-                                                   self._training_samples_means,
-                                                   self._training_samples_stds)
-        
-        if self.Ntest > 0:
-            self._testing_samples_means, self._testing_samples_stds = \
-                                        self._scale_arr(self.testing_samples)
-            self.testing_samples = self.scale_samples(self.testing_samples,
-                                                      self._testing_samples_means,
-                                                      self._testing_samples_stds)
-
-
-
-    def _scale_arr(self, samples):
-        '''
-        Get the means and standard deviations of each column in an input array 
-        for scaling.
-        
-        '''
-        mus, sigs = np.mean(samples, axis=0), np.std(samples, axis=0)
-
-	if np.any(sigs == 0):
-	    raise ValueError('Need some dispersion in the samples ' + \
-			     'to compute the parameter scaling.')
-
-	return mus, sigs
-
-
-
-    def scale_samples(self, samples, means=[], stds=[]):
-        '''
-        Scale the columns of the input parameter samples from physical units 
-        to mean zero and unit standard deviation.
-
-        Parameters
-        ----------
-        `samples` : array-like (Nparams,) or (Nsamples, Nparams,)
-            Array of parameters whose columns are to be scaled to mean zero 
-            and unit standard deviation.
-        `means` : array-like (Nparams,)
-            List of model parameter means from the training samples.
-        `stds` : array-like (Nparams,)
-            List of model parameter standard deviations from the training 
-            samples.
-
-        Returns
-        -------
-        `scaled_samples` : array-like (Nparams,) or (Nsamples, Nparams,)
-            Array of scaled parameter samples with the same shape as `samples`.
-
-        '''
-        means, stds = np.ascontiguousarray(means), np.ascontiguousarray(stds)
-        
-        if means.size == 0 or stds.size == 0:
-            return (samples - self._training_samples_means) / \
-                self._training_samples_stds
-        else:
-            return (samples - means) / stds
-
-
-
-    def inverse_scale_samples(self, scaled_samples, means=[], stds=[]):
-        '''Re-scale the columns of an input array of scaled  parameter samples 
-        to physical units using either input means and standard deviations 
-        or those from the training samples.
-
-        Parameters
-        ----------
-        `scaled_samples` : array-like (Nparams,) or (Nsamples, Nparams,)
-            Array of scaled parameters to scale to physical units given the 
-            parameter means and standard deviations.
-        `means` : array-like (Nparams,)
-            List of model parameter means from the training samples.
-        `stds` : array-like (Nparams,)
-            List of model parameter standard deviations from the training 
-            samples.
-
-        Returns
-        -------
-        `samples` : array-like (Nparams,) or (Nsamples, Nparams,)
-            Array of parameter samples scaled to physical units. Output has the
-            same shape as `scaled_samples`.
-
-        Example
-        -------
-        >>> print self.training_samples[0]
-        >>> array([ 0.21195, -0.29068,  0.60322,  0.33398, -0.48876])
-        >>> print self.inverse_scale_samples(self.training_samples[0],
-                                             self._training_samples_means,)
-                                             self._training_samples_stds)
-        >>> array([  7.000e+02, 1.183e+01, 2.858e+00, 1.477e+00, 2.780e-01])
-
-        '''
-        means, stds = np.array(means), np.array(stds)
-        
-        if means.size == 0 or stds.size == 0:
-            return scaled_samples * self._training_samples_stds + \
-                self._training_samples_means        
-        else:
-            return scaled_samples * stds + means
-
+        self._training_params_means, \
+        self._training_params_stds, \
+        self.training_params_scaled = scale_params(self.training_params)
+        self._testing_params_means, \
+        self._testing_params_stds, \
+        self.testing_params_scaled = scale_params(self.testing_params)
 
 
     def _decompose_spectra(self):
         '''
-        Decompose the training set of spectra into principal components (PCs)
+        Decompose the training spectra into principal components (PCs)
         for dimensionality reduction using SVD (see np.linalg.svd).
-        The number of PCs retained is determined by the the number of PCs
+        The number of PCs retained is determined either by the the number of PCs
         that are required to encapsulate `varthresh` of the total variance or 
-        are fixed to the value of `Npc`. 
+        are fixed to the value of `Npc` if non-zero. 
             
         Returns
         -------
         `self.basis_variances` : 1d array (Nwl,)
             The cumulative variance contained in the principal components from 
             the first to the Nwl^th.
-        `self.basis_functions` : 2d array (Npc, Nwl,)
-            The basis functions from PCA decomposition.
-        `self.training_spectra_PCs` : 2d array (Npc, Nwl,)
+        `self.basis_functions` : 2d array (Npc, Nwl)
+            The basis functions from PCA decomposition
+        `self.training_spectra_PCs` : 2d array (Npc, Ntrain)
             Projection of the data onto the basis functions; i.e. the 
-            principal components.
+            principal components
         `self._varthresh` : float
-            Variance encapsulated by the retained principle components.
+            Variance encapsulated by the retained PCs
         `self.Npc` : int
-            Number of retained PCs (<= Ntrain).
-        
+            Number of retained PCs (<= Ntrain)
+
         '''
         _,s,V = np.linalg.svd(self.training_spectra, full_matrices=True)
 	self.basis_variances = s.cumsum() / s.sum()
+        assert self.basis_variances.size == self.Nwl
 
         if self.Npc == 0:
             ind = np.where(self.basis_variances >= self._varthresh)[0][0] + 1
+            self.Npc = ind
         else:
             ind = self.Npc
             self._varthresh = self.basis_variances[:ind][-1]
 
         self.basis_functions = V[:ind]
+        assert self.basis_functions.shape == (self.Npc, self.Nwl)
+
         self.training_spectra_PCs = np.dot(self.training_spectra,
                                            self.basis_functions.T).T
-        self.Npc = self.basis_functions.shape[0]
+        assert self.training_spectra_PCs.shape == (self.Npc, self.Ntrain)
 
 
     def _get_GPemulators(self, Ntries=3, factr=10, pgtol=1e-20,
@@ -303,19 +212,27 @@ class EGRETS(object):
 
         # Define GP emulator to each basis function
         print '\nTraining GP emulators on %i principal components:\n'%self.Npc
-        self.emulators, self._optimization_success_fraction = [], 0.
+        self.emulators = []
         for i in xrange(self.Npc):
             print 'PC %i of %i...'%(i+1, self.Npc)
-            self.emulators.append(GPEmulator.GPEmulator(self.training_samples,
-				  self.training_spectra_PCs[i]))
+            # initialize the emulator for this PC
+            emulator = GPEmulator.GPEmulator(self.training_params,
+				             self.training_spectra_PCs[i])
+            self.emulators.append(emulator)
 
-            # Compute hyperparameters
+            # optimize the hyperparameters
             lnhyperparams0 = 5 * (np.random.rand(self.Nparams + 2) - .5)
-            self.emulators[i].learn_hyperparams(lnhyperparams0, Ntries=Ntries,
-                                                factr=factr, pgtol=pgtol,
-						verbose=verbose)
-	    self._optimization_success_fraction += self.emulators[i]._optimization_successful
-     	self._optimization_success_fraction /= self.Npc
+            emulator.learn_hyperparams(lnhyperparams0, Ntries=Ntries,
+                                       factr=factr, pgtol=pgtol,
+				       verbose=verbose)
+	    self._optimization_success_fraction += \
+                                            emulator._optimization_successful
+
+        # record the fraction of successful optimizations
+        self._optimization_success = np.zeros(self.Npc, dtype=bool)
+        for i in range(self.Npc):
+            self._optimization_success[i] = emulator._optimization_successful
+     	self._optimization_success_fraction = self._optimization_success.mean()
 
 
 
@@ -382,3 +299,52 @@ class EGRETS(object):
             pred_espec += ecoeffs[i] * self.basis_functions[i]
 
         return pred_spec, pred_espec, coeffs, ecoeffs
+
+
+def scale_params(params):
+    '''
+    Scale the input parameters to mean zero and unit standard deviation.
+    
+    Parameters
+    ----------
+    `params': 2d array (N, Nparams)
+        Model parameter sets to be scaled
+
+    Returns
+    -------
+    `means': 1d array (Nparams,)
+        The parameter mean values
+    `stds': 1d array (Nparams,)
+        The parameter standard deviations
+    `params_scaled': 2d array (N, Nparams)
+        The input array scaled to mean zero and unit standard deviation
+    '''
+    assert len(params.shape) == 2
+    means, stds = np.mean(params, axis=0), np.std(params, axis=0)
+    params_scaled = (params - means) / stds
+    return means, stds, params_scaled
+
+
+def inverse_scale_params(params_scaled, means, stds):
+    '''
+    Rescale the input parameters from mean zero and unit standard deviation to 
+    their previous physical values.
+    
+    Parameters
+    ----------
+    `params_scaled': 2d array (N, Nparams)
+        Scaled model parameters to be rescaled to physical values
+    `means': 1d array (Nparams,)
+        Mean parameter values
+    `stds': 1d array (Nparams,)
+        Parameter standard deviations
+
+    Returns
+    -------
+    `params': 2d array (N, Nparams)
+        The input array rescaled to physical values
+    '''
+    assert len(params.shape) == 2
+    assert params.shape[1] == means.size
+    assert params.shape[1] == stds.size
+    return params_scaled * stds + means
