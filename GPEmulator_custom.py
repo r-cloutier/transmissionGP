@@ -1,5 +1,8 @@
 from imports import *
 
+global kernel_names
+kernel_names = ['SE','M32','M52','S2','QP']
+
 
 class GPEmulator(object):
 
@@ -40,14 +43,13 @@ class GPEmulator(object):
             _initialize_GP(self)
 
 
-
-    def _negloglike(self, lnhyperparams):
+    def _neglnlike(self, lnhyperparams):
         '''
         Compute the negative of the log likelihood given a set of 
         hyperparameters.
         '''
-        self.lnhyperparams = np.array(lnhyperparams)
-        assert self.lnhyperparams.size == self.Nparams+2
+        self.lnhyperparams = np.ascontiguousarray(lnhyperparams)
+        assert self.lnhyperparams.size == self.Nhyperparams
 
         self._compute_covariance()
 
@@ -56,15 +58,12 @@ class GPEmulator(object):
                    self.Nsamples * np.log(2*np.pi))
 
     
-    def _partials(self, lnhyperparams):
+    def _partials(self):
         '''
-        Compute the partial derivatives of the log likelihood with the 
-        hyperparameters.
+        Compute the partial derivatives of the log likelihood with respect to 
+        the hyperparameters.
         '''
-        self.lnhyperparams = np.array(lnhyperparams)
-        assert self.lnhyperparams.size == self.Nparams+2
-        
-        partials = np.zeros(self.Nparams+2)
+        partials = np.zeros(self.Nhyperparams)
         self._compute_covariance()
         Kinvt = np.dot(self.Kinv, self.targets)
         
@@ -174,10 +173,8 @@ class GPEmulator(object):
         Given a set of log hyperparameters in `self.lnhyperparams`, compute the 
         covariance matrix K, the inverse of K, and log determinant of K.
         '''
-	kernel_funcs = ['SE']
-	if self.kernel not in kernel_funcs:
-	    raise AttributeError('%s is not a known covariance ' + \
-                                 'function.'%self.kernel)
+        assert self._kernel_name in kernel_names
+
 	if self.kernel == 'SE':
 	    self.K = self._cov_SE(self.samples, self.samples)
 
@@ -190,9 +187,10 @@ class GPEmulator(object):
         '''
         Compute the covariance matrix K using a squared-exponential kernel.
         '''
-        if x.shape[0] != xp.shape[0] and x.shape[0] != 1:
+        if (x.shape[0] != xp.shape[0]) & (x.shape[0] != 1):
             raise ValueError('`xp` must have the same number of entries as' + \
                              ' `x` or have only one entry for prediction.')
+        
         Ktmp = np.zeros((x.shape[0], xp.shape[0]))
         for i in xrange(self.Nparams):
             if x.shape[0] == xp.shape[0]:
@@ -202,10 +200,10 @@ class GPEmulator(object):
                 xmx = abs(x[:,i].reshape(x.shape[0],1) - xp[:,i])
             Ktmp += np.exp(self.lnhyperparams[i]) * xmx**2
         self.Z = np.exp(self.lnhyperparams[self.Nparams]) * np.exp(-.5 * Ktmp)
-        K = np.zeros_like(self.Z) + self.Z
+        self.K = np.zeros_like(self.Z) + self.Z
         if x.shape[0] == xp.shape[0]:
-            K += np.exp(self.lnhyperparams[self.Nparams+1]) * np.eye(x.shape[0])
-        return K
+            self.K *= np.exp(self.lnhyperparams[self.Nparams+1]) * \
+                      np.eye(x.shape[0])
 
 
     def predict(self, testsamples, mean_only=False):
@@ -258,3 +256,18 @@ class GPEmulator(object):
             #Kpp = self._cov_SE(testsamples, testsamples)
             #std = np.sqrt(float(Kpp - np.dot(Kp, np.dot(self.Kinv, Kp.T))))
             return mu, std
+
+
+def _define_Nhyperparams(self):
+    '''
+    Define the number of hyperparameters required to describe the adopted 
+    covariance kernel. 
+    '''
+    if self._kernel_name in ['SE','M32','M52']:
+        return self.Nparams + 1
+    elif self._kernel_name in ['S2']:
+        return self.Nparams*2 + 1
+    elif self._kernel_name in ['QP']:
+        return self.Nparams*3 + 1
+    else:
+        raise ValueError('Unknown kernel. Must be one of %s'%kernels)

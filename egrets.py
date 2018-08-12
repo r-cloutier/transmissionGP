@@ -3,7 +3,7 @@ import GPEmulator
 
 #samples = params
 
-class EGRETS():
+class EGRETS(object):
 
     
     def __init__(self, wl, spectra, params, Ntest=0, varthresh=.99, Npc=0):
@@ -158,7 +158,7 @@ class EGRETS():
         
 
     def generate_GPemulators(self, Ntries=1, kernel='SE', lnhyperparams=[],
-                             lnmaxvar=1):
+                             lnmaxvar=1, subset=0):
         '''
         Method to generate a GP emulator for each principal component found via 
         SVD (see self._decompose_spectra). The hyperparameters of each emulator
@@ -184,6 +184,10 @@ class EGRETS():
             lnhyperparameters. The resampling will perturb each 
             lnhyperparameter by a uniformly sampled value from  
             U(-lnmaxvar, lnmaxvar)
+        `subset`: scalar
+            If > 0, the optimization of the GP hyperparameters is conducted 
+            using only a subset of samples to reduce the wall time of the 
+            operation. Subset must be <= Nsamples
 
         Returns
         -------
@@ -212,7 +216,8 @@ class EGRETS():
                 lnhyperparams0 = 5*(np.random.rand(emulator.Nhyperparams)-.5)
                 emulator.learn_hyperparams(lnhyperparams0,
                                            **{'Ntries':int(Ntries),
-                                              'lnmaxvar':float(lnmaxvar)})
+                                              'lnmaxvar':float(lnmaxvar),
+                                              'subset':int(subset)})
 
         # record the fraction of successful optimizations
         self._optimization_success = np.zeros(self.Npc, dtype=bool)

@@ -105,7 +105,7 @@ class GPEmulator(object):
 
 
     def learn_hyperparams(self, lnhyperparams0, Ntries=1, lnmaxvar=1,
-                          **kwargs):
+                          subset=0, **kwargs):
         '''
         GP hyperparameter optimization method by maximizing the lnlikelihood 
         using scipy.optimize.
@@ -129,6 +129,10 @@ class GPEmulator(object):
             lnhyperparameters. The resampling will perturb each 
             lnhyperparameter by a uniformly sampled value from  
             U(-lnmaxvar, lnmaxvar)
+        `subset`: scalar
+            If > 0, the optimization of the GP hyperparameters is conducted 
+            using only a subset of samples to reduce the wall time of the 
+            operation. Subset must be <= Nsamples
 
         Returns
         -------
@@ -155,11 +159,19 @@ class GPEmulator(object):
                     lnperturb = np.array([np.random.uniform(-i,i)
                                           for i in lnmaxvar]) 
                 lnhyperparams0_try += lnperturb
+
+            # select a subset of samples if desired
+            inds = np.arange(self.Nsamples)
+            if subset > 0:
+                assert subset <= self.Nsamples
+                np.random.shuffle(inds)
+                inds = inds[:int(subset)]
                 
             # optimize the hyperparameters
             try:
                 self._initialize_GP(lnhyperparams0_try)
-                results = self.GP.optimize(self.params, self.targets, **kwargs)
+                results = self.GP.optimize(self.params[inds],
+                                           self.targets[inds], **kwargs)
                 lnhyperparams[attempt] = results[0]
                 self._optimization_successful = True
 
