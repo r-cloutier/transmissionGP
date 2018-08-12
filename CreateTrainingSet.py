@@ -15,8 +15,8 @@ def create_ExoTransmit_spectral_set(prefix, N, Nwl=430,
     ExoTransmit code (http://adsabs.harvard.edu/abs/2017PASP..129d4402K).
     Default parameters are for WASP-12b.
 
-    Parameters:
-    -----------
+    Arguments
+    ---------
     `prefix': string
         Prefix for the transmission spectrum file names
     `N': scalar

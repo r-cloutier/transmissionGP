@@ -14,8 +14,8 @@ class GPEmulator(object):
 	which can be given or found via the built-in optimization 
 	routine.
 
-	Parameters
-	----------
+	Arguments
+	---------
 	`params` : 2d array (Nsamples, Nparams)
 	    Array of sampled model parameters; i.e. input for the Gaussian 
             process
@@ -24,7 +24,7 @@ class GPEmulator(object):
 	    simulator spectra onto their basis functions
 	`kernel` : str
 	    String corresponding to the type of assumed covariance kernel. 
-            SUpported values are given in the `kernel_names` global variable
+            Supported values are given in the `kernel_names` global variable
         `lnhyperparams` : 1d array-like (Nhyperparams,)
              List of the logarithmic GP hyperparameters: log(covariance model 
              parameters and amplitude). If unspecified, need to run 
@@ -47,8 +47,8 @@ class GPEmulator(object):
         '''
         Initialize the Nparam-dimensional GP given a set of hyperparameters.
 
-        Parameters
-        ----------
+        Arguments
+        ---------
         `lnhyperparams` : 1d array-like (Nhyperparams,)
              List of the logarithmic GP hyperparameters: log(covariance model 
              parameters and amplitude). The number of hyperparameters will 
@@ -111,8 +111,8 @@ class GPEmulator(object):
         GP hyperparameter optimization method by maximizing the lnlikelihood 
         using scipy.optimize.
 
-        Parameters
-        ----------
+        Arguments
+        ---------
         `lnhyperparams0` : 1d array-like (Nhyperparams,)
              List of initial guesses of the logarithmic GP hyperparameters; 
              log(covariance model parameters, amplitude, and diagonal 
@@ -197,8 +197,8 @@ class GPEmulator(object):
         Method to emulate the target (i.e. basis function) weight coefficient 
         using the GP emulator.
 
-        Parameters
-        ----------
+        Arguments
+        ---------
         `params` : 1d array (Nparams,)
             List of model parameters whose spectrum you wish to emulate.
             The GP emulator will predict the weight coefficient of this 

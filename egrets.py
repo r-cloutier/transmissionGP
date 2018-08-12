@@ -6,15 +6,13 @@ from GPEmulator import *
 class EGRETS():
 
     
-    def __init__(self, wl, spectra, params, Ntest=0,
-                 Ntries=10, varthresh=.99, Npc=0, factr=10, pgtol=1e-20, 
-		 optimizeGPemulators=True, verbose=False):
+    def __init__(self, wl, spectra, params, Ntest=0, varthresh=.99, Npc=0):
         '''
         Construct a Gaussian process emulator of a radiative transfer 
         model (i.e. the simulator) given a set of input spectra to train on. 
         
-        Parameters
-        ----------
+        Arguments
+        ---------
         `wl` : 1d array (Nwl,)
             Wavelength array in microns
         `spectra` : 2d array (Nspec, Nwl)
@@ -36,24 +34,6 @@ class EGRETS():
         `Npc` : int
             The number of principal components to retain. If Npc > 0 then it 
             over-writes the value of varthresh and retains at most Npc PCs
-        `factr` : float
-            Determines when the optimization algorithm is terminated. Typical 
-            values for factr are: 1e12 for low accuracy; 1e7 for moderate 
-            accuracy; 10.0 for extremely high accuracy.
-        `pgtol` : float
-            Sets the stopping condition for the GP hyperparameter optimization 
-            routine.
-        `optimizeGPemulators': bool
-            If True, try to optimize the GP hyperparameters describing the 
-            training set
-        `Ntries` : int
-            Number of attempts to optimize the hyperparameters of the GP 
-            emulator after resampling the initial guess of each hyperparameter 
-            in each iteration.
-        `verbose` : bool
-            Controls the frequency of printed output to the shell when learning 
-            the GP hyperparameters. Set `verbose` to False to prevent such 
-            output.
 
         '''
         self.wl, self.Nwl = wl, wl.size
@@ -86,14 +66,14 @@ class EGRETS():
         #                         self._training_spectra_opaque_depths).T
         
         # scale model parameters to zero mean and unit std 
-        #self._scale_input_params()
+        self._scale_input_params()
 
         # do PCA
-        #self._decompose_spectra()
+        #self.decompose_spectra()
 
         # Get optimized GP emulator of the basis functions
 	#if optimizeGPemulators:
-        #    self._get_GPemulators(Ntries=Ntries, factr=self._factr,
+        #    self._generate_GPemulators(Ntries=Ntries, factr=self._factr,
         #                      	  pgtol=self._pgtol, verbose=verbose)
 
 
@@ -124,19 +104,21 @@ class EGRETS():
             Array of testing model parameters rescaled to zero mean and unit 
             standard deviation
         '''
-        self._training_params_means, \
-        self._training_params_stds, \
-        self.training_params_scaled = scale_params(self.training_params)
-        self._testing_params_means, \
-        self._testing_params_stds, \
-        self.testing_params_scaled = scale_params(self.testing_params)
+        if self.Ntrain > 1:
+            self._training_params_means, \
+            self._training_params_stds, \
+            self.training_params_scaled = scale_params(self.training_params)
+        if self.Ntest > 1:
+            self._testing_params_means, \
+            self._testing_params_stds, \
+            self.testing_params_scaled = scale_params(self.testing_params)
 
 
-    def _decompose_spectra(self):
+    def decompose_spectra(self):
         '''
-        Decompose the training spectra into principal components (PCs)
+        Method to decompose the training spectra into principal components (PCs)
         for dimensionality reduction using SVD (see np.linalg.svd).
-        The number of PCs retained is determined either by the the number of PCs
+        The number of PCs retained is determined either by the number of PCs
         that are required to encapsulate `varthresh` of the total variance or 
         are fixed to the value of `Npc` if non-zero. 
             
@@ -165,8 +147,8 @@ class EGRETS():
             self.Npc = ind
         else:
             ind = self.Npc
-            self._varthresh = self.basis_variances[:ind][-1]
 
+        self._varthresh = self.basis_variances[:ind][-1]                
         self.basis_functions = V[:ind]
         assert self.basis_functions.shape == (self.Npc, self.Nwl)
 
@@ -175,15 +157,14 @@ class EGRETS():
         assert self.training_spectra_PCs.shape == (self.Npc, self.Ntrain)
 
 
-    def _get_GPemulators(self, Ntries=3, factr=10, pgtol=1e-20,
-			 kernel='SE'):
+    def generate_GPemulators(self, Ntries=10, kernel='SE', lnhyperparams=[]):
         '''
-        Create a GP emulator for each principal component found via SVD (see 
-        self._decompose_spectra). The hyperparameters of each emulator are 
-        then optimized and can be used for predictive purposes.
+        Method to gerenate a GP emulator for each principal component found via 
+        SVD (see self._decompose_spectra). The hyperparameters of each emulator
+        are then optimized and can be used for predictive purposes.
 
-        Parameters
-        ----------
+        Arguments
+        ---------
         `Ntries` : int
             Number of attempts at optimizing the hyperparameters. For each 
             attempt the initial guess is perturbed and used as a new initial 
@@ -191,7 +172,12 @@ class EGRETS():
             hyperparameters which maximize the lnlikelihood is selected
         `kernel` : str
             String corresponding to the type of assumed covariance kernel.
-            SUpported values are given in the `kernel_names` global variable
+            Supported values are given in the `kernel_names` global variable
+        `lnhyperparams` : 1d array-like (Nhyperparams,)
+             List of the logarithmic GP hyperparameters: log(covariance model
+             parameters and amplitude). If unspecified, need to run
+             GPEmulator.learn_hyperparams to get hyperparameters and initialize
+             the GP
 
         Returns
         -------
@@ -201,7 +187,7 @@ class EGRETS():
 
         '''
         if not hasattr(self, 'basis_functions') or not hasattr(self, 'Npc'):
-            raise AttributeError('First run EGRETS._decompose_spectra.')
+            raise AttributeError('First run EGRETS.decompose_spectra.')
 
         # Define GP emulator to each basis function
         print '\nTraining GP emulators on %i principal components:\n'%self.Npc
@@ -211,7 +197,8 @@ class EGRETS():
             # initialize the emulator for this PC
             emulator = GPEmulator.GPEmulator(self.training_params,
 				             self.training_spectra_PCs[i],
-                                             kernel=kernel)
+                                             **{'kernel':kernel,
+                                                'lnhyperparams':lnhyperparams})
             self.emulators.append(emulator)
 
             # optimize the hyperparameters
@@ -235,8 +222,8 @@ class EGRETS():
         Predict the PC weights using the trained GP emulators of the 
         PCs. Then reconstruct the emulated spectrum from the weights.
 
-        Parameters
-        ----------
+        Arguments
+        ---------
         `pred_sample` : array-like  (Nparams,)
             List of model parameters, in physical/unscaled units, whose 
             corresponding spectrum the user wishes to emulate using the trained 
@@ -299,18 +286,18 @@ def scale_params(params):
     '''
     Scale the input parameters to mean zero and unit standard deviation.
     
-    Parameters
-    ----------
-    `params': 2d array (N, Nparams)
+    Arguments
+    ---------
+    `params`: 2d array (N, Nparams)
         Model parameter sets to be scaled
 
     Returns
     -------
-    `means': 1d array (Nparams,)
+    `means`: 1d array (Nparams,)
         The parameter mean values
-    `stds': 1d array (Nparams,)
+    `stds`: 1d array (Nparams,)
         The parameter standard deviations
-    `params_scaled': 2d array (N, Nparams)
+    `params_scaled`: 2d array (N, Nparams)
         The input array scaled to mean zero and unit standard deviation
     '''
     assert len(params.shape) == 2
@@ -325,21 +312,21 @@ def inverse_scale_params(params_scaled, means, stds):
     Rescale the input parameters from mean zero and unit standard deviation to 
     their previous physical values.
     
-    Parameters
-    ----------
-    `params_scaled': 2d array (N, Nparams)
+    Arguments
+    ---------
+    `params_scaled`: 2d array (N, Nparams)
         Scaled model parameters to be rescaled to physical values
-    `means': 1d array (Nparams,)
+    `means`: 1d array (Nparams,)
         Mean parameter values
-    `stds': 1d array (Nparams,)
+    `stds`: 1d array (Nparams,)
         Parameter standard deviations
 
     Returns
     -------
-    `params': 2d array (N, Nparams)
+    `params`: 2d array (N, Nparams)
         The input array rescaled to physical values
     '''
-    assert len(params.shape) == 2
-    assert params.shape[1] == means.size
-    assert params.shape[1] == stds.size
+    assert len(params_scaled.shape) == 2
+    assert params_scaled.shape[1] == means.size
+    assert params_scaled.shape[1] == stds.size
     return params_scaled * stds + means
