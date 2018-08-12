@@ -86,15 +86,15 @@ class EGRETS():
         #                         self._training_spectra_opaque_depths).T
         
         # scale model parameters to zero mean and unit std 
-        self._scale_input_params()
+        #self._scale_input_params()
 
         # do PCA
-        self._decompose_spectra()
+        #self._decompose_spectra()
 
         # Get optimized GP emulator of the basis functions
-	if optimizeGPemulators:
-            self._get_GPemulators(Ntries=Ntries, factr=self._factr,
-                              	  pgtol=self._pgtol, verbose=verbose)
+	#if optimizeGPemulators:
+        #    self._get_GPemulators(Ntries=Ntries, factr=self._factr,
+        #                      	  pgtol=self._pgtol, verbose=verbose)
 
 
 
@@ -105,22 +105,22 @@ class EGRETS():
 
         Returns
         -------
-        `_training_samples_means` : 1d array (Nparams,)
+        `_training_params_means` : 1d array (Nparams,)
             List of training model parameter means. Useful for converting 
             scaled parameters back to their input physical units.
-        `_training_samples_stds` : 1d array (Nparams,)
+        `_training_params_stds` : 1d array (Nparams,)
             List of training model parameter standard deviations. Useful for 
             converting scaled parameters back to their input physical units.
-        `training_samples` : 2d array (Ntrain, Nparams)
+        `training_params` : 2d array (Ntrain, Nparams)
             Array of training model parameters rescaled to zero mean and unit 
             standard deviation
-        `_testing_samples_means` : 1d array (Nparams,)
+        `_testing_params_means` : 1d array (Nparams,)
             List of testing model parameter means. Useful for converting 
             scaled parameters back to their input physical units.
-        `_testing_samples_stds` : 1d array (Nparams,)
+        `_testing_params_stds` : 1d array (Nparams,)
             List of testing model parameter standard deviations. Useful for 
             converting scaled parameters back to their input physical units.
-        `testing_samples` : 2d array (Ntest, Nparams)
+        `testing_params` : 2d array (Ntest, Nparams)
             Array of testing model parameters rescaled to zero mean and unit 
             standard deviation
         '''
@@ -176,7 +176,7 @@ class EGRETS():
 
 
     def _get_GPemulators(self, Ntries=3, factr=10, pgtol=1e-20,
-			 verbose=False):
+			 kernel='SE'):
         '''
         Create a GP emulator for each principal component found via SVD (see 
         self._decompose_spectra). The hyperparameters of each emulator are 
@@ -188,17 +188,10 @@ class EGRETS():
             Number of attempts at optimizing the hyperparameters. For each 
             attempt the initial guess is perturbed and used as a new initial 
             guess in the optimization algorthim. The optimized set of 
-            hyperparameters which maximize the lnlikelihood is selected.
-        `factr` : float
-            Determines when the optimization algorithm is terminated. Typical 
-            values for factr are: 1e12 for low accuracy; 1e7 for moderate 
-            accuracy; 10.0 for extremely high accuracy.
-	`pgtol` : float
-	    Sets the stopping condition for the GP hyperparameter optimization 
-	    routine.
-        `verbose` : bool
-            Controls the frequency of printed output to the shell. Set 
-            `verbose` to False to prevent such output.
+            hyperparameters which maximize the lnlikelihood is selected
+        `kernel` : str
+            String corresponding to the type of assumed covariance kernel.
+            SUpported values are given in the `kernel_names` global variable
 
         Returns
         -------
@@ -217,7 +210,8 @@ class EGRETS():
             print 'PC %i of %i...'%(i+1, self.Npc)
             # initialize the emulator for this PC
             emulator = GPEmulator.GPEmulator(self.training_params,
-				             self.training_spectra_PCs[i])
+				             self.training_spectra_PCs[i],
+                                             kernel=kernel)
             self.emulators.append(emulator)
 
             # optimize the hyperparameters
@@ -321,6 +315,7 @@ def scale_params(params):
     '''
     assert len(params.shape) == 2
     means, stds = np.mean(params, axis=0), np.std(params, axis=0)
+    assert np.all(stds > 0)
     params_scaled = (params - means) / stds
     return means, stds, params_scaled
 

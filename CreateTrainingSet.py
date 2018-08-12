@@ -107,7 +107,7 @@ def create_ExoTransmit_spectral_set(prefix, N, Nwl=430,
         
     # save input parameters and spectra
     _save_results(prefix, Ts, gs, rps, Rss, logPcs, rayleighs, chems, logXss,
-                  scattering, CIA, wl, specs)
+                  wl, specs)
 
 
 def _setup_exotransmit(suffix, T, g, rp, Rs, logPc, rayleigh, chems, logXs,
@@ -322,21 +322,18 @@ def _clean_up(prefix, suffix):
 
     
 def _save_results(prefix, Ts, gs, rps, Rss, logPcs, rayleighs, chems, logXss,
-                  scattering, CIA, wl, specs):
+                  wl, specs):
     '''
     Save the input parameter values and ExoTransmit spectra for a set of 
     calculations.
     '''
     assert logXss.shape == (Ts.size, chems.size)
     assert specs.shape == (Ts.size, wl.size)
-    params = np.array([Ts, gs, rps, Rss, logPcs, rayleighs,
-                       np.repeat(scattering, Ts.size).astype(int),
-                       np.repeat(CIA, Ts.size).astype(int)]).T
+    params = np.array([Ts, gs, rps, Rss, logPcs, rayleighs]).T
     params = np.append(params, logXss, axis=1)
     chemlabels = ['logX_%s'%c for c in chems]
     labels = np.append(['T [K]','g [m/s^2]','rp [RJup]','Rs [RSun]',
-                        'logPc [log(bar)]', 'rayleigh [-]','scattering [bool]',
-                        'CIA [bool]'], chemlabels)
+                        'logPc [log(bar)]', 'rayleigh [N/A]'], chemlabels)
     try:
         os.mkdir(path2output)
     except OSError:
