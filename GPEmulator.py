@@ -34,12 +34,12 @@ class GPEmulator(object):
         assert len(params.shape) == 2
         assert len(targets.shape) == 1
         
-        self.params, self.targets = samples, targets
+        self.params, self.targets = params, targets
 	self.Nsamples, self.Nparams = self.params.shape
-	assert self.targets.size == self.Nsamples
+	assert self.targets.shape == (self.Nsamples,)
         self._kernel_name = kernel
-        assert self._kernel_name in kernel_names
-        
+        self.Nhyperparams = _define_Nhyperparams(self)
+
         if len(lnhyperparams) > 0:
             _initialize_GP(self)
         
@@ -59,13 +59,14 @@ class GPEmulator(object):
 
         Returns
         -------
-        `GP': george.GP object
+        `lnhyperparams`: 1d array (Nhyperparams,)
+            See `lnhyperparams` argument
+        `GP`: george.GP object
             The gp object of the model parameters using a specified kernel 
             and set of lnhyperparameters
         '''
         self.lnhyperparams = np.ascontiguousarray(lnhyperparams)
-        self.Nhyperparams = self.lnhyperparams.size
-        assert self.Nhyperparams == _define_Nhyperparams(self)
+        assert self.lnhyperparams.size == self.Nhyperparams
 
         if self._kernel_name == 'SE':
             ls = np.exp(self.lnhyperparams[:self.Nparams])
@@ -136,8 +137,6 @@ class GPEmulator(object):
             model parameters, amplitude, diagonal covariance term)
 
         '''
-        self._initialize_GP(lnhyperparams0)
-
         Ntries = int(Ntries) 
         lnhyperparams, lnlikes = np.zeros((Ntries,self.Nhyperparams)), \
                                  np.zeros(Ntries)

@@ -1,5 +1,5 @@
 from imports import *
-from GPEmulator import *
+import GPEmulator
 
 #samples = params
 
@@ -55,7 +55,7 @@ class EGRETS():
         assert self.testing_spectra.shape == (self.Ntest, self.Nwl)
         assert self.testing_params.shape == (self.Ntest, self.Nparams)
 
-        self._varthresh = varthresh if 0 < varthresh <= 1 else .99
+        self.varthresh = varthresh if 0 < varthresh <= 1 else .99
         self.Npc= int(Npc)
         assert self.Npc <= self.Ntrain
         
@@ -131,7 +131,7 @@ class EGRETS():
         `self.training_spectra_PCs` : 2d array (Npc, Ntrain)
             Projection of the data onto the basis functions; i.e. the 
             principal components
-        `self._varthresh` : float
+        `self.varthresh` : float
             Variance encapsulated by the retained PCs
         `self.Npc` : int
             Number of retained PCs (<= Ntrain)
@@ -142,12 +142,12 @@ class EGRETS():
         assert self.basis_variances.size == self.Nwl
 
         if self.Npc == 0:
-            ind = np.where(self.basis_variances >= self._varthresh)[0][0] + 1
+            ind = np.where(self.basis_variances >= self.varthresh)[0][0] + 1
             self.Npc = ind
         else:
             ind = self.Npc
 
-        self._varthresh = self.basis_variances[:ind][-1]                
+        self.varthresh = self.basis_variances[:ind][-1]                
         self.basis_functions = V[:ind]
         assert self.basis_functions.shape == (self.Npc, self.Nwl)
 
@@ -157,7 +157,8 @@ class EGRETS():
         self._decompose_spectra_DONE = True
         
 
-    def generate_GPemulators(self, Ntries=10, kernel='SE', lnhyperparams=[]):
+    def generate_GPemulators(self, Ntries=1, kernel='SE', lnhyperparams=[],
+                             lnmaxvar=1):
         '''
         Method to generate a GP emulator for each principal component found via 
         SVD (see self._decompose_spectra). The hyperparameters of each emulator
@@ -178,6 +179,11 @@ class EGRETS():
              parameters and amplitude). If unspecified, need to run
              GPEmulator.learn_hyperparams to get hyperparameters and initialize
              the GP
+        `lnmaxvar`: scalar or array-like (Nhyperparams,)
+            If Ntries > 1, the maximum variance permitted when resampling the 
+            lnhyperparameters. The resampling will perturb each 
+            lnhyperparameter by a uniformly sampled value from  
+            U(-lnmaxvar, lnmaxvar)
 
         Returns
         -------
@@ -186,16 +192,16 @@ class EGRETS():
             GPEmulator.GPEmulator).
 
         '''
-        if not self._decompose_spectr_DONE:
+        if not self._decompose_spectra_DONE:
             raise AttributeError('First run EGRETS.decompose_spectra()')
 
-        # Define GP emulator to each basis function
+        # define GP emulator to each basis function
         print '\nTraining GP emulators on %i principal components:\n'%self.Npc
         self.emulators = []
         for i in xrange(self.Npc):
             print 'PC %i of %i...'%(i+1, self.Npc)
             # initialize the emulator for this PC
-            emulator = GPEmulator.GPEmulator(self.training_params,
+            emulator = GPEmulator.GPEmulator(self.training_params_scaled,
 				             self.training_spectra_PCs[i],
                                              **{'kernel':kernel,
                                                 'lnhyperparams':lnhyperparams})
@@ -203,12 +209,10 @@ class EGRETS():
 
             # optimize the hyperparameters if not specified
             if len(lnhyperparams) == 0:
-                lnhyperparams0 = 5 * (np.random.rand(self.Nparams + 2) - .5)
+                lnhyperparams0 = 5*(np.random.rand(emulator.Nhyperparams)-.5)
                 emulator.learn_hyperparams(lnhyperparams0,
                                            **{'Ntries':int(Ntries),
                                               'lnmaxvar':float(lnmaxvar)})
-	        self._optimization_success_fraction += \
-                                            emulator._optimization_successful
 
         # record the fraction of successful optimizations
         self._optimization_success = np.zeros(self.Npc, dtype=bool)
