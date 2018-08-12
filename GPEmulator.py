@@ -38,10 +38,11 @@ class GPEmulator(object):
 	self.Nsamples, self.Nparams = self.params.shape
 	assert self.targets.size == self.Nsamples
         self._kernel_name = kernel
-
+        assert self._kernel_name in kernel_names
+        
         if len(lnhyperparams) > 0:
             _initialize_GP(self)
-
+        
 
     def _initialize_GP(self, lnhyperparams):
         '''
@@ -64,29 +65,26 @@ class GPEmulator(object):
         '''
         self.lnhyperparams = np.ascontiguousarray(lnhyperparams)
         self.Nhyperparams = self.lnhyperparams.size
+        assert self.Nhyperparams == _define_Nhyperparams(self)
+
         if self._kernel_name == 'SE':
-            assert self.Nhyperparams == self.Nparams+1
             ls = np.exp(self.lnhyperparams[:self.Nparams])
             k = george.kernels.ExpSquaredKernel(ls, ndim=self.Nparams)
 
         elif self._kernel_name == 'M32':
-            assert self.Nhyperparams == self.Nparams+1
             ls = np.exp(self.lnhyperparams[:self.Nparams])
             k = george.kernels.Matern32Kernel(ls, ndim=self.Nparams)
 
         elif self._kernel_name == 'M52':
-            assert self.Nhyperparams == self.Nparams+1
             ls = np.exp(self.lnhyperparams[:self.Nparams])
             k = george.kernels.Matern52Kernel(ls, ndim=self.Nparams)
 
         elif self._kernel_name == 'S2':
-            assert self.Nhyperparams == self.Nparams*2+1
             Gs = np.exp(self.lnhyperparams[:self.Nparams])
             Ps = np.exp(self.lnhyperparams[self.Nparams:2*self.Nparams])
             k = george.kernels.ExpSine2Kernel(Gs, Ps, ndim=self.Nparams)
 
         elif self._kernel_name == 'QP':
-            assert self.Nhyperparams == self.Nparams*3+1
             ls = np.exp(self.lnhyperparams[:self.Nparams])
             Gs = np.exp(self.lnhyperparams[self.Nparams:2*self.Nparams])
             Ps = np.exp(self.lnhyperparams[2*self.Nparams:3*self.Nparams])
@@ -152,7 +150,7 @@ class GPEmulator(object):
             if attempt > 0:
                 if lnmaxvar.size == 1:
                     lnperturb = np.random.uniform(-lnmaxvar, lnmaxvar,
-                                                self.Nhyperparams)
+                                                  self.Nhyperparams)
                 else:
                     assert lnmaxvar.size == self.Nhyperparams
                     lnperturb = np.array([np.random.uniform(-i,i)
@@ -226,3 +224,18 @@ class GPEmulator(object):
         else:
             mu, cov = p
             return mu, np.sqrt(cov)
+
+
+def _define_Nhyperparams(self):
+    '''
+    Define the number of hyperparameters required to describe the adopted 
+    covariance kernel. 
+    '''
+    if self._kernel_name in ['SE','M32','M52']:
+        return self.Nparams + 1
+    elif self._kernel_name in ['S2']:
+        return self.Nparams*2 + 1
+    elif self._kernel_name in ['QP']:
+        return self.Nparams*3 + 1
+    else:
+        raise ValueError('Unknown kernel. Must be one of %s'%kernels)

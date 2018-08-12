@@ -56,7 +56,7 @@ class EGRETS():
         assert self.testing_params.shape == (self.Ntest, self.Nparams)
 
         self._varthresh = varthresh if 0 < varthresh <= 1 else .99
-        self.Npc, self._factr, self._pgtol= int(Npc), factr, pgtol
+        self.Npc= int(Npc)
         assert self.Npc <= self.Ntrain
         
         # shift training spectra to min = zero
@@ -69,12 +69,11 @@ class EGRETS():
         self._scale_input_params()
 
         # do PCA
+        self._decompose_spectra_DONE = False
         #self.decompose_spectra()
 
-        # Get optimized GP emulator of the basis functions
-	#if optimizeGPemulators:
-        #    self._generate_GPemulators(Ntries=Ntries, factr=self._factr,
-        #                      	  pgtol=self._pgtol, verbose=verbose)
+        # get optimized GP emulator of the basis functions
+        #self.generate_GPemulators(Ntries=Ntries)
 
 
 
@@ -155,11 +154,12 @@ class EGRETS():
         self.training_spectra_PCs = np.dot(self.training_spectra,
                                            self.basis_functions.T).T
         assert self.training_spectra_PCs.shape == (self.Npc, self.Ntrain)
-
+        self._decompose_spectra_DONE = True
+        
 
     def generate_GPemulators(self, Ntries=10, kernel='SE', lnhyperparams=[]):
         '''
-        Method to gerenate a GP emulator for each principal component found via 
+        Method to generate a GP emulator for each principal component found via 
         SVD (see self._decompose_spectra). The hyperparameters of each emulator
         are then optimized and can be used for predictive purposes.
 
@@ -186,8 +186,8 @@ class EGRETS():
             GPEmulator.GPEmulator).
 
         '''
-        if not hasattr(self, 'basis_functions') or not hasattr(self, 'Npc'):
-            raise AttributeError('First run EGRETS.decompose_spectra.')
+        if not self._decompose_spectr_DONE:
+            raise AttributeError('First run EGRETS.decompose_spectra()')
 
         # Define GP emulator to each basis function
         print '\nTraining GP emulators on %i principal components:\n'%self.Npc
@@ -201,12 +201,13 @@ class EGRETS():
                                                 'lnhyperparams':lnhyperparams})
             self.emulators.append(emulator)
 
-            # optimize the hyperparameters
-            lnhyperparams0 = 5 * (np.random.rand(self.Nparams + 2) - .5)
-            emulator.learn_hyperparams(lnhyperparams0, Ntries=Ntries,
-                                       factr=factr, pgtol=pgtol,
-				       verbose=verbose)
-	    self._optimization_success_fraction += \
+            # optimize the hyperparameters if not specified
+            if len(lnhyperparams) == 0:
+                lnhyperparams0 = 5 * (np.random.rand(self.Nparams + 2) - .5)
+                emulator.learn_hyperparams(lnhyperparams0,
+                                           **{'Ntries':int(Ntries),
+                                              'lnmaxvar':float(lnmaxvar)})
+	        self._optimization_success_fraction += \
                                             emulator._optimization_successful
 
         # record the fraction of successful optimizations
